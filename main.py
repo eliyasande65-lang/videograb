@@ -23,6 +23,7 @@ import shutil
 import threading
 import mimetypes
 import webbrowser
+from urllib.parse import unquote
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -428,13 +429,13 @@ KV = r'''
 <Card>:
     canvas.before:
         Color:
-            rgba: 0, 0, 0, .72
+            rgba: 0, 0, 0, .78
         RoundedRectangle:
-            pos: self.x, self.y - dp(3)
-            size: self.size
+            pos: self.x, self.y - dp(4)
+            size: self.width, self.height + dp(1)
             radius: [dp(18)]
         Color:
-            rgba: 1, 1, 1, .10
+            rgba: 1, 1, 1, .18
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -445,6 +446,18 @@ KV = r'''
             pos: self.x + dp(1), self.y + dp(1)
             size: self.width - dp(2), self.height - dp(2)
             radius: [dp(18)]
+        Color:
+            rgba: 1, 1, 1, .07
+        RoundedRectangle:
+            pos: self.x + dp(5), self.top - dp(4)
+            size: self.width - dp(10), dp(1)
+            radius: [dp(1)]
+        Color:
+            rgba: 0, 0, 0, .22
+        RoundedRectangle:
+            pos: self.x + dp(5), self.y + dp(2)
+            size: self.width - dp(10), dp(1)
+            radius: [dp(1)]
 
 <RBtn>:
     background_normal: ''
@@ -455,23 +468,35 @@ KV = r'''
     font_size: sp(15)
     canvas.before:
         Color:
-            rgba: 0, 0, 0, .85
+            rgba: 0, 0, 0, .82
         RoundedRectangle:
-            pos: self.x, self.y - dp(3)
-            size: self.size
+            pos: self.x, self.y - dp(4)
+            size: self.width, self.height + dp(1)
             radius: [dp(14)]
         Color:
-            rgba: 1, 1, 1, .18
-        RoundedRectangle:
-            pos: self.x, self.y + dp(2)
-            size: self.size
-            radius: [dp(14)]
-        Color:
-            rgba: (.30, .30, .30, 1) if self.state == 'down' else (1, 1, 1, 1 if not self.disabled else .45)
+            rgba: .16, .16, .16, 1
         RoundedRectangle:
             pos: self.pos
             size: self.size
             radius: [dp(14)]
+        Color:
+            rgba: (self.bg[0] * (.72 if self.state == 'down' else 1), self.bg[1] * (.72 if self.state == 'down' else 1), self.bg[2] * (.72 if self.state == 'down' else 1), self.bg[3] * (.45 if self.disabled else 1))
+        RoundedRectangle:
+            pos: self.x + dp(1), self.y + dp(1)
+            size: self.width - dp(2), self.height - dp(3)
+            radius: [dp(13)]
+        Color:
+            rgba: 1, 1, 1, .26 if not self.disabled else .12
+        RoundedRectangle:
+            pos: self.x + dp(5), self.top - dp(7)
+            size: self.width - dp(10), dp(2)
+            radius: [dp(2)]
+        Color:
+            rgba: 0, 0, 0, .12 if self.state == 'down' else .08
+        RoundedRectangle:
+            pos: self.x + dp(5), self.y + dp(2)
+            size: self.width - dp(10), dp(2)
+            radius: [dp(2)]
 
 <Chip>:
     group: 'quality'
@@ -1635,7 +1660,9 @@ class VideoGrabApp(App):
             return ''
         if platform != 'android':
             if uri.startswith('file://'):
-                uri = uri[7:]
+                uri = unquote(uri[7:])
+                if os.name == 'nt' and re.match(r'^/[A-Za-z]:', uri):
+                    uri = uri[1:]
             return uri if os.path.exists(uri) else ''
         if uri.startswith('file://'):
             path = uri[7:]
@@ -1664,13 +1691,21 @@ class VideoGrabApp(App):
             return ''
 
     def play(self, e):
-        path = self._playback_path(e.get('uri', ''))
+        uri = e.get('uri', '')
+        if platform == 'android':
+            if not open_media(uri, e.get('mime', 'video/*')):
+                self.toast('No compatible video player could open this file.', 3.5)
+            return
+
+        path = self._playback_path(uri)
         if not path:
             self.toast('Could not open the file. It may have been moved or deleted.', 3.5)
             return
         player = self.root.ids.sm.get_screen('player')
         player.ids.player_title.text = e.get('title', 'Now playing')
         video = player.ids.video
+        video.state = 'stop'
+        video.source = ''
         video.source = path
         video.state = 'play'
         self.go('player')
@@ -1679,9 +1714,7 @@ class VideoGrabApp(App):
         player = self.root.ids.sm.get_screen('player')
         video = player.ids.video
         video.state = 'stop'
-        unload = getattr(video, 'unload', None)
-        if unload:
-            unload()
+        video.source = ''
         self.go('library')
 
     def share(self, e):
