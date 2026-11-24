@@ -40,6 +40,7 @@ from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.widget import Widget
+from kivy.uix.videoplayer import VideoPlayer
 from kivy.utils import platform
 
 try:
@@ -356,11 +357,11 @@ class Toast(Label):
 
 
 class Card(BoxLayout):
-    bg = ListProperty([0.102, 0.122, 0.212, 1])
+    bg = ListProperty([0.075, 0.075, 0.075, 1])
 
 
 class RBtn(Button):
-    bg = ListProperty([0.10, 0.83, 0.55, 1])
+    bg = ListProperty([1, 1, 1, 1])
 
 
 class Chip(ToggleButton):
@@ -414,6 +415,10 @@ class MoreScreen(Screen):
     pass
 
 
+class PlayerScreen(Screen):
+    pass
+
+
 # ----------------------------------------------------------------------------
 # UI definition
 # ----------------------------------------------------------------------------
@@ -423,22 +428,46 @@ KV = r'''
 <Card>:
     canvas.before:
         Color:
-            rgba: self.bg
+            rgba: 0, 0, 0, .72
+        RoundedRectangle:
+            pos: self.x, self.y - dp(3)
+            size: self.size
+            radius: [dp(18)]
+        Color:
+            rgba: 1, 1, 1, .10
         RoundedRectangle:
             pos: self.pos
             size: self.size
+            radius: [dp(18)]
+        Color:
+            rgba: self.bg
+        RoundedRectangle:
+            pos: self.x + dp(1), self.y + dp(1)
+            size: self.width - dp(2), self.height - dp(2)
             radius: [dp(18)]
 
 <RBtn>:
     background_normal: ''
     background_down: ''
     background_color: 0, 0, 0, 0
-    color: (1, 1, 1, 1) if not self.disabled else (1, 1, 1, .45)
+    color: (0.05, 0.05, 0.05, 1) if not self.disabled else (.35, .35, .35, 1)
     bold: True
     font_size: sp(15)
     canvas.before:
         Color:
-            rgba: ((self.bg[0] * .7, self.bg[1] * .7, self.bg[2] * .7, 1) if self.state == 'down' else (self.bg[0], self.bg[1], self.bg[2], 1 if not self.disabled else .45))
+            rgba: 0, 0, 0, .85
+        RoundedRectangle:
+            pos: self.x, self.y - dp(3)
+            size: self.size
+            radius: [dp(14)]
+        Color:
+            rgba: 1, 1, 1, .18
+        RoundedRectangle:
+            pos: self.x, self.y + dp(2)
+            size: self.size
+            radius: [dp(14)]
+        Color:
+            rgba: (.30, .30, .30, 1) if self.state == 'down' else (1, 1, 1, 1 if not self.disabled else .45)
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -452,10 +481,10 @@ KV = r'''
     background_color: 0, 0, 0, 0
     bold: True
     font_size: sp(14)
-    color: (0.04, 0.08, 0.10, 1) if self.state == 'down' else (1, 1, 1, .75)
+    color: (0.05, 0.05, 0.05, 1) if self.state == 'down' else (1, 1, 1, .75)
     canvas.before:
         Color:
-            rgba: (0.10, 0.83, 0.55, 1) if self.state == 'down' else (1, 1, 1, 0.08)
+            rgba: (1, 1, 1, 1) if self.state == 'down' else (1, 1, 1, 0.08)
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -469,10 +498,10 @@ KV = r'''
     background_color: 0, 0, 0, 0
     bold: True
     font_size: sp(14)
-    color: (0.10, 0.83, 0.55, 1) if self.state == 'down' else (1, 1, 1, .55)
+    color: (1, 1, 1, 1) if self.state == 'down' else (1, 1, 1, .55)
     canvas.after:
         Color:
-            rgba: (0.10, 0.83, 0.55, 1) if self.state == 'down' else (0, 0, 0, 0)
+            rgba: (1, 1, 1, 1) if self.state == 'down' else (0, 0, 0, 0)
         RoundedRectangle:
             pos: self.x + self.width * .3, self.y + dp(2)
             size: self.width * .4, dp(3)
@@ -487,7 +516,7 @@ KV = r'''
             size: self.size
             radius: [self.height / 2.]
         Color:
-            rgba: 0.10, 0.83, 0.55, 1
+            rgba: 1, 1, 1, 1
         RoundedRectangle:
             pos: self.pos
             size: (self.width * max(0.03, min(self.value, 1.0)), self.height)
@@ -505,7 +534,7 @@ KV = r'''
     valign: 'middle'
     canvas.before:
         Color:
-            rgba: 0.10, 0.12, 0.22, .98
+            rgba: 0.045, 0.045, 0.045, .98
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -550,7 +579,6 @@ KV = r'''
             text: root.action_text
             size_hint_x: None
             width: dp(110)
-            bg: (.85, .25, .32, 1) if root.action_text == 'Cancel' else (.18, .20, .34, 1)
             on_release: root.on_action()
 
 <HistRow>:
@@ -604,12 +632,10 @@ KV = r'''
             RBtn:
                 text: 'Share'
                 font_size: sp(13)
-                bg: .18, .48, 1, 1
                 on_release: app.share(root.entry)
             RBtn:
                 text: 'Delete'
                 font_size: sp(13)
-                bg: .85, .25, .32, 1
                 on_release: app.delete_entry(root.entry)
 
 <Root>:
@@ -617,7 +643,7 @@ KV = r'''
         orientation: 'vertical'
         canvas.before:
             Color:
-                rgba: 0.059, 0.071, 0.125, 1
+                rgba: 0.020, 0.020, 0.020, 1
             Rectangle:
                 pos: self.pos
                 size: self.size
@@ -628,12 +654,14 @@ KV = r'''
             QueueScreen:
             LibraryScreen:
             MoreScreen:
+            PlayerScreen:
         BoxLayout:
+            id: nav_bar
             size_hint_y: None
             height: dp(60)
             canvas.before:
                 Color:
-                    rgba: 0.09, 0.105, 0.19, 1
+                    rgba: 0.055, 0.055, 0.055, 1
                 Rectangle:
                     pos: self.pos
                     size: self.size
@@ -657,6 +685,47 @@ KV = r'''
     Toast:
         id: toast
 
+<PlayerScreen>:
+    name: 'player'
+    BoxLayout:
+        orientation: 'vertical'
+        canvas.before:
+            Color:
+                rgba: 0.020, 0.020, 0.020, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        BoxLayout:
+            size_hint_y: None
+            height: dp(64)
+            padding: dp(12), dp(8)
+            spacing: dp(10)
+            RBtn:
+                text: 'Close'
+                size_hint_x: None
+                width: dp(90)
+                on_release: app.close_player()
+            Label:
+                id: player_title
+                text: 'Now playing'
+                bold: True
+                font_size: sp(17)
+                text_size: self.size
+                halign: 'left'
+                valign: 'middle'
+                shorten: True
+                shorten_from: 'right'
+        VideoPlayer:
+            id: video
+            state: 'play'
+            options: {'allow_stretch': True, 'eos': 'stop'}
+            canvas.before:
+                Color:
+                    rgba: 0, 0, 0, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
 <HomeScreen>:
     name: 'home'
     ScrollView:
@@ -672,7 +741,7 @@ KV = r'''
                 text: 'VideoGrab'
                 font_size: sp(32)
                 bold: True
-                color: 0.10, 0.83, 0.55, 1
+                color: 1, 1, 1, 1
                 size_hint_y: None
                 height: dp(44)
                 text_size: self.size
@@ -706,7 +775,7 @@ KV = r'''
                     background_color: 1, 1, 1, .08
                     foreground_color: 1, 1, 1, 1
                     hint_text_color: 1, 1, 1, .4
-                    cursor_color: 0.10, 0.83, 0.55, 1
+                    cursor_color: 1, 1, 1, 1
                     font_size: sp(15)
                     on_text_validate: app.analyze()
                 BoxLayout:
@@ -715,11 +784,9 @@ KV = r'''
                     spacing: dp(10)
                     RBtn:
                         text: 'Paste'
-                        bg: .18, .48, 1, 1
                         on_release: app.paste_link()
                     RBtn:
                         text: 'Clear'
-                        bg: .18, .20, .34, 1
                         on_release: app.clear_link()
                 Label:
                     text: 'Quality'
@@ -764,7 +831,6 @@ KV = r'''
             RBtn:
                 text: 'Checking...' if root.busy else 'Analyze link'
                 disabled: root.busy
-                bg: .18, .48, 1, 1
                 size_hint_y: None
                 height: dp(50)
                 on_release: app.analyze()
@@ -847,7 +913,6 @@ KV = r'''
                 font_size: sp(13)
                 size_hint_x: None
                 width: dp(130)
-                bg: .18, .20, .34, 1
                 on_release: app.clear_finished()
         ScrollView:
             do_scroll_x: False
@@ -893,7 +958,7 @@ KV = r'''
             background_color: 1, 1, 1, .08
             foreground_color: 1, 1, 1, 1
             hint_text_color: 1, 1, 1, .4
-            cursor_color: 0.10, 0.83, 0.55, 1
+            cursor_color: 1, 1, 1, 1
             on_text: app.refresh_history(self.text)
         ScrollView:
             do_scroll_x: False
@@ -941,7 +1006,7 @@ KV = r'''
                 Label:
                     text: 'Stats'
                     bold: True
-                    color: 0.10, 0.83, 0.55, 1
+                    color: 1, 1, 1, 1
                     size_hint_y: None
                     height: dp(22)
                     text_size: self.size
@@ -996,7 +1061,7 @@ KV = r'''
                 Label:
                     text: 'Download engine'
                     bold: True
-                    color: 0.10, 0.83, 0.55, 1
+                    color: 1, 1, 1, 1
                     size_hint_y: None
                     height: dp(22)
                     text_size: self.size
@@ -1023,7 +1088,6 @@ KV = r'''
                     on_release: app.update_engine()
             RBtn:
                 text: 'Clear library list'
-                bg: .85, .25, .32, 1
                 size_hint_y: None
                 height: dp(46)
                 on_release: app.clear_history()
@@ -1114,6 +1178,9 @@ class VideoGrabApp(App):
 
     def on_key(self, window, key, *args):
         if key == 27:  # Android back / Esc
+            if self.current == 'player':
+                self.close_player()
+                return True
             if self.current != 'home':
                 self.go('home')
                 return True
@@ -1142,7 +1209,16 @@ class VideoGrabApp(App):
     def go(self, name):
         self.current = name
         self.root.ids.sm.current = name
-        self.root.ids['nav_' + name].state = 'down'
+        nav = self.root.ids.nav_bar
+        if name == 'player':
+            nav.height = 0
+            nav.opacity = 0
+        else:
+            nav.height = dp(60)
+            nav.opacity = 1
+            nav_id = self.root.ids.get('nav_' + name)
+            if nav_id is not None:
+                nav_id.state = 'down'
 
     def toast(self, msg, secs=2.4):
         t = self.root.ids.toast
@@ -1390,11 +1466,11 @@ class VideoGrabApp(App):
             row.action_text = 'Cancel'
         elif st == 'done':
             row.status_text = 'Done  |  ' + fmt_size(j['size'])
-            row.status_color = [0.10, 0.83, 0.55, 1]
+            row.status_color = [1, 1, 1, 1]
             row.action_text = 'Remove'
         elif st == 'error':
             row.status_text = j['error'] or 'Failed'
-            row.status_color = [1, 0.45, 0.45, 1]
+            row.status_color = [1, 1, 1, .85]
             row.action_text = 'Retry'
         elif st == 'cancelled':
             row.status_text = 'Cancelled'
@@ -1554,9 +1630,59 @@ class VideoGrabApp(App):
         else:
             self.stats_text = 'No downloads yet.'
 
+    def _playback_path(self, uri):
+        if not uri:
+            return ''
+        if platform != 'android':
+            if uri.startswith('file://'):
+                uri = uri[7:]
+            return uri if os.path.exists(uri) else ''
+        if uri.startswith('file://'):
+            path = uri[7:]
+            return path if os.path.exists(path) else ''
+        if not uri.startswith('content://'):
+            return uri if os.path.exists(uri) else ''
+
+        try:
+            from jnius import autoclass
+            Uri = autoclass('android.net.Uri')
+            ins = _activity().getContentResolver().openInputStream(Uri.parse(uri))
+            if ins is None:
+                return ''
+            os.makedirs(os.path.join(DATA_DIR, 'playback'), exist_ok=True)
+            path = os.path.join(DATA_DIR, 'playback', 'current.mp4')
+            buf = bytearray(256 * 1024)
+            with open(path, 'wb') as out:
+                while True:
+                    n = ins.read(buf)
+                    if n <= 0:
+                        break
+                    out.write(buf[:n])
+            ins.close()
+            return path
+        except Exception:
+            return ''
+
     def play(self, e):
-        if not open_media(e.get('uri', ''), e.get('mime', 'video/*')):
+        path = self._playback_path(e.get('uri', ''))
+        if not path:
             self.toast('Could not open the file. It may have been moved or deleted.', 3.5)
+            return
+        player = self.root.ids.sm.get_screen('player')
+        player.ids.player_title.text = e.get('title', 'Now playing')
+        video = player.ids.video
+        video.source = path
+        video.state = 'play'
+        self.go('player')
+
+    def close_player(self):
+        player = self.root.ids.sm.get_screen('player')
+        video = player.ids.video
+        video.state = 'stop'
+        unload = getattr(video, 'unload', None)
+        if unload:
+            unload()
+        self.go('library')
 
     def share(self, e):
         if not share_media(e.get('uri', ''), e.get('mime', 'video/*'), e.get('url', '')):
