@@ -9,6 +9,7 @@ requirements = python3,kivy==2.3.0,pyjnius,android,certifi,openssl,yt-dlp
 orientation = portrait
 fullscreen = 0
 icon.filename = %(source.dir)s/icon.png
+presplash.filename = %(source.dir)s/icon.png
 presplash.color = #1a1535
 p4a.branch = v2024.01.21
 
