@@ -9,6 +9,7 @@ Features
   * Quality picker: Best / 1080p / 720p / 480p / 360p / Audio only
   * Download queue with live progress, speed, ETA, cancel and retry
   * Library with search, play, share and delete
+  * Built-in player (plays inside the app, no other app needed)
   * Saves into Downloads/VideoGrab (visible in your Gallery / Files app)
   * One-tap "Update engine" so sites keep working without a new APK
 """
@@ -22,6 +23,7 @@ import uuid
 import shutil
 import threading
 import mimetypes
+import traceback
 import webbrowser
 from urllib.parse import unquote
 
@@ -43,6 +45,12 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.widget import Widget
 from kivy.uix.videoplayer import VideoPlayer
 from kivy.utils import platform
+
+if platform == 'android':
+    from android.runnable import run_on_ui_thread
+else:
+    def run_on_ui_thread(f):
+        return f
 
 try:
     import certifi
@@ -81,6 +89,23 @@ HIST_FILE = ''
 
 class Cancelled(Exception):
     pass
+
+
+class QuietLogger(object):
+    """Gives yt-dlp somewhere to send its messages so it never has to write
+    to Android's replaced stdout/stderr."""
+
+    def debug(self, msg):
+        pass
+
+    def info(self, msg):
+        pass
+
+    def warning(self, msg):
+        pass
+
+    def error(self, msg):
+        pass
 
 
 # ----------------------------------------------------------------------------
@@ -144,6 +169,19 @@ def friendly_error(e):
     if len(msg) > 200:
         msg = msg[:200] + '...'
     return msg or 'Something went wrong.'
+
+
+def error_where(e):
+    """Short 'file:line' trail of where an unexpected error happened."""
+    try:
+        frames = traceback.extract_tb(e.__traceback__)
+        out = []
+        for fr in frames[-2:]:
+            parts = fr.filename.replace('\\', '/').split('/')
+            out.append('%s:%s' % ('/'.join(parts[-2:]), fr.lineno))
+        return ' < '.join(reversed(out))
+    except Exception:
+        return ''
 
 
 def pick_thumb(info):
@@ -289,6 +327,7 @@ def _uri_for(uri_str):
 
 
 def open_media(uri_str, mime):
+    """Hand a file to another app (only used as a last-resort fallback)."""
     if platform != 'android':
         try:
             webbrowser.open('file://' + uri_str)
@@ -344,6 +383,160 @@ def delete_media(uri_str):
         return True
     except Exception:
         return False
+
+
+# ----------------------------------------------------------------------------
+# In-app player for Android (native VideoView placed under the app's own
+# header, so the Kivy Close button and title stay exactly as designed)
+# ----------------------------------------------------------------------------
+_LISTENERS = []
+
+
+def _listeners():
+    if _LISTENERS:
+        return _LISTENERS[0]
+    from jnius import PythonJavaClass, java_method
+
+    class Prepared(PythonJavaClass):
+        __javainterfaces__ = ['android/media/MediaPlayer$OnPreparedListener']
+        __javacontext__ = 'app'
+
+        def __init__(self, cb, *args, **kwargs):
+            super(Prepared, self).__init__(*args, **kwargs)
+            self.cb = cb
+
+        @java_method('(Landroid/media/MediaPlayer;)V')
+        def onPrepared(self, mp):
+            try:
+                self.cb(mp)
+            except Exception:
+                pass
+
+    class Error(PythonJavaClass):
+        __javainterfaces__ = ['android/media/MediaPlayer$OnErrorListener']
+        __javacontext__ = 'app'
+
+        def __init__(self, cb, *args, **kwargs):
+            super(Error, self).__init__(*args, **kwargs)
+            self.cb = cb
+
+        @java_method('(Landroid/media/MediaPlayer;II)Z')
+        def onError(self, mp, what, extra):
+            try:
+                self.cb()
+            except Exception:
+                pass
+            return True
+
+    _LISTENERS.append((Prepared, Error))
+    return _LISTENERS[0]
+
+
+class NativePlayer(object):
+    HEADER_DP = 64   # height of the Kivy player header (see PlayerScreen)
+
+    def __init__(self):
+        self.active = False
+        self.layout = None
+        self.vv = None
+        self.mc = None
+        self._refs = []
+
+    def open(self, uri_str, on_fail):
+        self.active = True
+        self._open(uri_str, on_fail)
+
+    def close(self):
+        self.active = False
+        self._close()
+
+    @run_on_ui_thread
+    def _open(self, uri_str, on_fail):
+        try:
+            from jnius import autoclass
+            Prepared, Error = _listeners()
+            act = _activity()
+            self._close_now()
+            density = act.getResources().getDisplayMetrics().density
+            FrameLayout = autoclass('android.widget.FrameLayout')
+            FLP = autoclass('android.widget.FrameLayout$LayoutParams')
+            VideoView = autoclass('android.widget.VideoView')
+            MediaController = autoclass('android.widget.MediaController')
+            Color = autoclass('android.graphics.Color')
+
+            layout = FrameLayout(act)
+            layout.setBackgroundColor(Color.BLACK)
+            vv = VideoView(act)
+            layout.addView(vv, FLP(-1, -1, 17))   # 17 = Gravity.CENTER
+            mc = MediaController(act)
+            mc.setAnchorView(vv)
+            vv.setMediaController(mc)
+
+            prepared = Prepared(self._on_prepared)
+            error = Error(lambda: self._on_error(on_fail))
+            self._refs = [prepared, error]
+            vv.setOnPreparedListener(prepared)
+            vv.setOnErrorListener(error)
+            vv.setVideoURI(_uri_for(uri_str))
+
+            params = FLP(-1, -1)
+            params.setMargins(0, int(self.HEADER_DP * density), 0, 0)
+            act.addContentView(layout, params)
+            self.layout, self.vv, self.mc = layout, vv, mc
+            vv.requestFocus()
+        except Exception:
+            self._close_now()
+            self.active = False
+            Clock.schedule_once(lambda dt: on_fail())
+
+    def _on_prepared(self, mp):
+        try:
+            if mp.getVideoWidth() > mp.getVideoHeight():
+                _activity().setRequestedOrientation(6)   # sensor landscape
+        except Exception:
+            pass
+        try:
+            self.vv.start()
+            self.mc.show(3000)
+        except Exception:
+            pass
+
+    def _on_error(self, on_fail):
+        self._close_now()
+        self.active = False
+        Clock.schedule_once(lambda dt: on_fail())
+
+    @run_on_ui_thread
+    def _close(self):
+        self._close_now()
+
+    def _close_now(self):
+        try:
+            if self.mc is not None:
+                self.mc.hide()
+        except Exception:
+            pass
+        try:
+            if self.vv is not None:
+                self.vv.stopPlayback()
+        except Exception:
+            pass
+        try:
+            if self.layout is not None:
+                from jnius import cast
+                parent = self.layout.getParent()
+                if parent is not None:
+                    cast('android.view.ViewGroup', parent).removeView(self.layout)
+        except Exception:
+            pass
+        try:
+            _activity().setRequestedOrientation(1)       # back to portrait
+        except Exception:
+            pass
+        self.layout = None
+        self.vv = None
+        self.mc = None
+        self._refs = []
 
 
 # ----------------------------------------------------------------------------
@@ -1159,6 +1352,7 @@ class VideoGrabApp(App):
         self.last_clip = ''
         self.quality = self.cfg.get('quality', 'best')
         self.ready = False
+        self.native_player = NativePlayer()
 
         Window.softinput_mode = 'below_target'
         Window.bind(on_keyboard=self.on_key)
@@ -1232,6 +1426,8 @@ class VideoGrabApp(App):
 
     # ---- navigation / toast ------------------------------------------------
     def go(self, name):
+        if name != 'player' and self.native_player.active:
+            self.native_player.close()
         self.current = name
         self.root.ids.sm.current = name
         nav = self.root.ids.nav_bar
@@ -1348,7 +1544,8 @@ class VideoGrabApp(App):
         try:
             yt = load_ytdlp()
             opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True,
-                    'skip_download': True, 'socket_timeout': 25, 'cachedir': False}
+                    'skip_download': True, 'socket_timeout': 25, 'cachedir': False,
+                    'logger': QuietLogger(), 'no_color': True}
             with yt.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
             if info and info.get('entries'):
@@ -1402,7 +1599,7 @@ class VideoGrabApp(App):
             'status': 'queued',
             'progress': 0.0,
             'speed': None, 'eta': None,
-            'error': '', 'cancel': False,
+            'error': '', 'where': '', 'cancel': False,
             'path': '', 'uri': '', 'size': 0,
         }
         self.jobs.append(job)
@@ -1447,7 +1644,7 @@ class VideoGrabApp(App):
         elif st == 'saving':
             self.toast('Almost done...')
         elif st in ('error', 'cancelled'):
-            job.update(status='queued', progress=0.0, error='', cancel=False,
+            job.update(status='queued', progress=0.0, error='', where='', cancel=False,
                        speed=None, eta=None, logged=False, notified=False)
             self._pump()
         elif st == 'done':
@@ -1494,7 +1691,8 @@ class VideoGrabApp(App):
             row.status_color = [1, 1, 1, 1]
             row.action_text = 'Remove'
         elif st == 'error':
-            row.status_text = j['error'] or 'Failed'
+            row.status_text = (j['error'] or 'Failed') + (
+                ('  [' + j['where'] + ']') if j.get('where') else '')
             row.status_color = [1, 1, 1, .85]
             row.action_text = 'Retry'
         elif st == 'cancelled':
@@ -1512,7 +1710,10 @@ class VideoGrabApp(App):
                 self.toast('Saved: ' + j['title'][:40])
             elif j['status'] == 'error' and not j.get('notified'):
                 j['notified'] = True
-                self.toast(j['error'] or 'Download failed', 4)
+                msg = j['error'] or 'Download failed'
+                if j.get('where'):
+                    msg += '\n' + j['where']
+                self.toast(msg, 6)
         active = sum(1 for j in self.jobs if j['status'] in ACTIVE)
         self.queue_label = 'Queue (%d)' % active if active else 'Queue'
 
@@ -1550,6 +1751,7 @@ class VideoGrabApp(App):
                 'socket_timeout': 25, 'retries': 5, 'fragment_retries': 5,
                 'concurrent_fragment_downloads': 4, 'windowsfilenames': True,
                 'cachedir': False, 'overwrites': True,
+                'logger': QuietLogger(), 'no_color': True,
             }
             with yt.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(job['url'], download=True)
@@ -1595,8 +1797,12 @@ class VideoGrabApp(App):
             if job['cancel']:
                 job['status'] = 'cancelled'
             else:
+                msg = friendly_error(e)
+                raw = ANSI.sub('', str(e)).replace('ERROR: ', '').strip()
+                job['error'] = msg
+                # unexpected error: keep a short trail of where it happened
+                job['where'] = error_where(e) if (msg == raw or msg == raw[:200] + '...') else ''
                 job['status'] = 'error'
-                job['error'] = friendly_error(e)
         finally:
             for p in glob.glob(os.path.join(tmp, job['id'] + '_*')):
                 try:
@@ -1692,23 +1898,35 @@ class VideoGrabApp(App):
 
     def play(self, e):
         uri = e.get('uri', '')
+        player = self.root.ids.sm.get_screen('player')
+        player.ids.player_title.text = e.get('title', 'Now playing')
+
         if platform == 'android':
-            if not open_media(uri, e.get('mime', 'video/*')):
-                self.toast('No compatible video player could open this file.', 3.5)
+            if not uri:
+                self.toast('Could not open the file. It may have been moved or deleted.', 3.5)
+                return
+            self.go('player')
+            self.native_player.open(uri, lambda: self._native_failed(e))
             return
 
         path = self._playback_path(uri)
         if not path:
             self.toast('Could not open the file. It may have been moved or deleted.', 3.5)
             return
-        player = self.root.ids.sm.get_screen('player')
-        player.ids.player_title.text = e.get('title', 'Now playing')
         video = player.ids.video
         video.state = 'stop'
         video.source = ''
         video.source = path
         video.state = 'play'
         self.go('player')
+
+    def _native_failed(self, e):
+        # the built-in player could not play this file: try another player
+        self.go('library')
+        if not open_media(e.get('uri', ''), e.get('mime', 'video/*')):
+            self.toast('This file could not be played. It may be damaged or deleted.', 3.5)
+        else:
+            self.toast('Opening in another player...', 2.5)
 
     def close_player(self):
         player = self.root.ids.sm.get_screen('player')
